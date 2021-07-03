@@ -2,6 +2,7 @@
 #define MQTT_MAX_PACKET_SIZE 2048
 #endif
 
+#include "Arduino.h"
 #include "var.h";
 #include "config.h";
 #include "ArduinoJson.h"
@@ -12,7 +13,7 @@
 #include <vector>
 #include <IRremoteESP8266.h>
 
-string registryTopic =  "/device/register";
+const char* registryTopic =  "/device/register";
 WiFiClient espClient;
 PubSubClient MQTTClient(espClient);
 
@@ -46,7 +47,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
   data[length] = '\0';
   
   Serial.println("receve new data");
-  DynamicJsonDocument doc(2048);
+  DynamicJsonDocument doc(8112);
   DeserializationError error = deserializeJson(doc, data);
 
   if (error) {
@@ -91,7 +92,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
     uint16_t v = doc["v"].as<uint16_t>();
     pinMode(p, OUTPUT);
     cmdFeedBack["p"] = p; 
-    analogWrite(p,v);
+    //analogWrite(p,v);
   }
   //红外发射
   if(strcmp(cmd,"irs") == 0) {
@@ -116,7 +117,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
   String output = "";
   serializeJson( cmdFeedBack,  output);
    
-  MQTTClient.publish(registryTopic, jsonDeviceInfo(output).c_str());
+  MQTTClient.publish(registryTopic, jsonDeviceInfo(output).c_str(), true);
 }
 
 void setup() {
@@ -158,6 +159,6 @@ void loop() {
   unsigned long now = millis();
   if (now - lastMsg > 5000) {
     lastMsg = now;
-    MQTTClient.publish(registryTopic, jsonDeviceInfo("").c_str());
+    MQTTClient.publish(registryTopic,jsonDeviceInfo("").c_str(),true);
   }
 }
