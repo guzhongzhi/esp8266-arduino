@@ -112,12 +112,13 @@ void callback(char* topic, byte* payload, unsigned int length) {
   }
 
   const char* cmd = doc["cmd"].as<char*>();
-
+  Serial.println(cmd);
+  
   DynamicJsonDocument cmdFeedBack(256);
   cmdFeedBack["c"] = cmd;
 
   if ( strcmp(cmd,"stepper") == 0 ) {
-    //{"cmd":"stepper","d":[14,13,12,15],"v":2000,"pr":200,"st":1}
+    //{"cmd":"stepper","d":[15,12,13,14],"v":100,"pr":200,"st":1}
     Serial.println("setup stepper");
     JsonArray data = doc["d"];
     for(int i=0;i<4;i++) {
@@ -130,8 +131,8 @@ void callback(char* topic, byte* payload, unsigned int length) {
     int stepsPerRevolution = doc["pr"].as<int>(); // change this to fit the number of steps per revolution
     //stepper = new Stepper(stepsPerRevolution, stepperPins[0],stepperPins[1],stepperPins[2],stepperPins[3]);
     stepper->motor_pin_1 = stepperPins[0];
-    stepper->motor_pin_2 = stepperPins[1];
-    stepper->motor_pin_3 = stepperPins[2];
+    stepper->motor_pin_2 = stepperPins[2]; //电机不能反转,需要调换两个的位置
+    stepper->motor_pin_3 = stepperPins[1]; //电机不能反转,需要调换两个的位置
     stepper->motor_pin_4 = stepperPins[3];
     stepper->number_of_steps = stepsPerRevolution;
   }
@@ -227,7 +228,7 @@ void setup() {
   #ifdef DEBUG
   Serial.println(WiFi.macAddress());
   #endif
-  MQTTClient.setServer("mqtt.home.gulusoft.com", 1883);
+  MQTTClient.setServer("mqtt.gulusoft.com", 1883);
   MQTTClient.setCallback(callback);
 
   //
