@@ -51,7 +51,7 @@ String lastIRData = "";
 Stepper* stepper = NULL;
 //https://blog.csdn.net/weixin_42358937/article/details/107022433
 //电机不能反转
-Stepper myStepper(200, 0,0,0,0);
+Stepper myStepper(64, 0,0,0,0);
 int stepperPins[4];
 int stepperTotal = 0;
 int stepperST = 1;
