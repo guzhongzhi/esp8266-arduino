@@ -7,26 +7,18 @@ void smartConfig()
 {
     WiFi.mode( WIFI_STA );
     WiFi.beginSmartConfig();
+    Serial.println("smartConfig");
     while ( WiFi.status() != WL_CONNECTED )
     {
-        #ifdef DEBUG
-        Serial.println("smartConfig");
-        #endif
-         
         if (! WiFi.smartConfigDone() )
         {
             delay( 1000 );
-            #ifdef DEBUG
-            Serial.println("smconfig");
-            #endif
+            Serial.print(".");
             continue;
         }
-        WiFi.setAutoConnect( true ); 
-        break;
     }
-    #ifdef DEBUG
+    WiFi.setAutoConnect( true ); 
     Serial.println( WiFi.localIP());
-    #endif
 }
 
 bool autoConfig()
@@ -37,8 +29,6 @@ bool autoConfig()
     //WiFi.begin("10012503", "gd10012503");
     
     WiFi.begin();
-    
-    
     short int maxNum = 10;
     while ( maxNum  > 0)
     {

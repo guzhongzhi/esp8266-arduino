@@ -23,7 +23,7 @@ void MQTTConnect() {
     #ifdef DEBUG
     Serial.print("Attempting MQTT connection...");
     #endif
-    String clientId = "/client/" + WiFi.macAddress();
+    String clientId = "/client/" + WiFi.macAddress() + String(random(0xffff), HEX);
     if (MQTTClient.connect(clientId.c_str(),"mqtt","mqtt")) {
       #ifdef DEBUG
       Serial.println("connected");
@@ -47,7 +47,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
   }
   data[length] = '\0';
   Serial.println(length);
-   int docLen = (int) (8102);
+   int docLen = (int) (1024);
   DynamicJsonDocument doc(docLen);
   DeserializationError error = deserializeJson(doc, data);
 
@@ -76,9 +76,9 @@ void callback(char* topic, byte* payload, unsigned int length) {
     uint16_t v = doc["pin"]["v"].as<uint16_t>();
     pinMode(p, OUTPUT);
     if(v > 0) {
-      digitalWrite(p,1);    
+      digitalWrite(p,HIGH);    
     } else {
-      digitalWrite(p,0);
+      digitalWrite(p,LOW);
     }
   }
   //读取模拟信号
@@ -111,9 +111,7 @@ void setup() {
   if (!autoConfig()){
       smartConfig();
   }
-  #ifdef DEBUG
   Serial.println(WiFi.macAddress());
-  #endif
   MQTTClient.setServer("mqtt.home.gulusoft.com", 1883);
   MQTTClient.setCallback(callback);
 }
@@ -137,7 +135,6 @@ String jsonDeviceInfo(String data) {
 unsigned long lastMsg = 0;
 
 void cloop() {
- 
   unsigned long now = millis();
   if (!MQTTClient.connected()) {
     MQTTConnect();
@@ -145,6 +142,7 @@ void cloop() {
   MQTTClient.loop();
   if (now - lastMsg > 10000) {
     lastMsg = now;
+    Serial.println(jsonDeviceInfo(""));
     MQTTClient.publish(registryTopic, jsonDeviceInfo("").c_str());
   }
 }
