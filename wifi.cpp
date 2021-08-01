@@ -1,4 +1,5 @@
 #include <ESP8266WiFi.h>
+#include <WiFiClient.h>
 #include "config.h"
 
 
@@ -30,14 +31,13 @@ void smartConfig()
 
 bool autoConfig()
 {
-    WiFi.mode(WIFI_STA);
+    Serial.println( "\r\nWait for Smartconfig" );
+    WiFi.mode(WIFI_STA);    
+    //Serial.print( "connect wifi." );
+    //WiFi.begin("10012503", "gd10012503");
     
-    #ifdef DEBUG
-    Serial.print( "connect wifi." );
-    WiFi.begin("10012503", "gd10012503");
-    #else
     WiFi.begin();
-    #endif
+    
     
     short int maxNum = 10;
     while ( maxNum  > 0)
