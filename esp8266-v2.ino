@@ -14,22 +14,39 @@
 #include <vector>
 #include <IRremoteESP8266.h>
 
-#include <assert.h>
-#include <IRtext.h>
-#include <IRutils.h>
 
 //红外发射头/接收文件
+#include <assert.h>
 #include <IRac.h>
 #include <IRrecv.h>
+#include <IRtext.h>
+#include <IRutils.h>
+#include <IRac.h>
+
+
+
 
 const char* registryTopic =  "/device/register";
 WiFiClient espClient;
 PubSubClient MQTTClient(espClient);
 
 //
-IRrecv* irReceiver = NULL;
-IRrecv irrecv(4, 2048, 15, true);
 
+const uint16_t kRecvPin = 14;
+const uint32_t kBaudRate = 115200;
+const uint16_t kCaptureBufferSize = 1024;
+const uint8_t kTolerancePercentage = kTolerance;  // kTolerance is normally 25%
+#if DECODE_AC
+const uint8_t kTimeout = 50;
+#else   // DECODE_AC
+const uint8_t kTimeout = 15;
+#endif  // DECODE_AC
+const uint16_t kMinUnknownSize = 12;
+#define LEGACY_TIMING_INFO false
+IRrecv* irReceiver = NULL;
+IRrecv irrecv(14, 1024, 15, true);
+decode_results results;  // Somewhere to store the results
+String lastIRData = "";
 //
 Stepper* stepper = NULL;
 //https://blog.csdn.net/weixin_42358937/article/details/107022433
@@ -82,17 +99,24 @@ String formatIRData2(String m) {
 }
 
 bool checkIrInput() {
-  if(irReceiver == NULL){
-    return false;
-  }
-  decode_results results;
-  if (irrecv.decode(&results)) {
+   bool rs=irrecv.decode(&results);
+   if(!rs) {
+       return false;
+   }
     String a = resultToSourceCode(&results);
-    Serial.println(a.c_str());
-    MQTTClient.publish(registryTopic, jsonDeviceInfo(a.c_str()).c_str());
-    return true;
-  }
-  return false;
+    String b = formatIRData2(a);
+    Serial.println("===========================================");
+
+   int docLen = (int)(2048);
+   DynamicJsonDocument  doc(docLen);
+   doc["c"] = "rir";
+   doc["d"] = b;
+   String output = "";
+   serializeJson( doc,  output);
+   Serial.println(output);
+   lastIRData=output;
+   yield();
+   return true;
 }
 
 void callback(char* topic, byte* payload, unsigned int length) {
@@ -101,8 +125,9 @@ void callback(char* topic, byte* payload, unsigned int length) {
     data[i] = (char) payload[i];
   }
   data[length] = '\0';
-  
-  DynamicJsonDocument doc(8116);
+  Serial.println(length);
+   int docLen = (int) (8102);
+  DynamicJsonDocument doc(docLen);
   DeserializationError error = deserializeJson(doc, data);
 
   if (error) {
@@ -144,7 +169,8 @@ void callback(char* topic, byte* payload, unsigned int length) {
     if(p > 0) {
       pinMode(p, INPUT);
       IRrecv irrecv(p, 1024, 15, true);
-      irrecv.setTolerance(15);  // Override the default tolerance.
+      irrecv.setTolerance(25);  // Override the default tolerance.
+      irrecv.setUnknownThreshold(12);
       irrecv.enableIRIn();      // Start the receiver
       irReceiver = &irrecv;
     } else if(irReceiver != NULL) {
@@ -215,11 +241,6 @@ void callback(char* topic, byte* payload, unsigned int length) {
 void setup() {
   Serial.begin(115200);
   Serial.println("");
-  irReceiver = NULL;
-  
-  irrecv.setUnknownThreshold(12);
-  irrecv.setTolerance(15);  // Override the default tolerance.
-  irrecv.enableIRIn();      // Start the receiver
   
   Serial.println(MQTT_MAX_PACKET_SIZE);
   if (!autoConfig()){
@@ -233,11 +254,19 @@ void setup() {
 
   //
   stepper = &myStepper;
+
+  
+  irReceiver = NULL;
+  
+  irrecv.setUnknownThreshold(12);
+  irrecv.setTolerance(25);  // Override the default tolerance.
+  irrecv.enableIRIn();      // Start the receiver
 }
 
 String jsonDeviceInfo(String data) {
    extern String versionCode;
-   StaticJsonDocument<256> doc;
+
+   DynamicJsonDocument  doc(data.length() + 256);
    doc["m"] = WiFi.macAddress();
    doc["i"] = WiFi.localIP().toString();
    doc["w"] = WiFi.SSID();
@@ -251,8 +280,11 @@ String jsonDeviceInfo(String data) {
 }
 
 unsigned long lastMsg = 0;
-void loop() {
-  if( stepperTotal > 0 && stepper != NULL) {
+
+void cloop() {
+ 
+  unsigned long now = millis();
+ if( stepperTotal > 0 && stepper != NULL) {
     Serial.println(stepperTotal);
     stepperTotal--;
     stepper->step(stepperST > 0 ? 1 : -1);
@@ -268,11 +300,22 @@ void loop() {
   if (!MQTTClient.connected()) {
     MQTTConnect();
   }
+  if(lastIRData != "") {
+    Serial.println("send ir data");
+    Serial.println(lastIRData);
+    MQTTClient.publish(registryTopic, jsonDeviceInfo(lastIRData.c_str()).c_str());
+    lastIRData = "";
+    lastMsg = now;
+  }
   MQTTClient.loop();
   checkIrInput();
-  unsigned long now = millis();
   if (now - lastMsg > 10000) {
     lastMsg = now;
     MQTTClient.publish(registryTopic, jsonDeviceInfo("").c_str());
   }
+  
+}
+
+void loop() {
+  cloop();
 }
