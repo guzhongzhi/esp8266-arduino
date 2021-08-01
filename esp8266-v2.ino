@@ -294,7 +294,7 @@ void cloop() {
           digitalWrite(stepperPins[i], LOW);
       }
     }
-    delay(100);
+    delay(50);
     return;
   }
   if (!MQTTClient.connected()) {
