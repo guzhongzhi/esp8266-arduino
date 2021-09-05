@@ -13,6 +13,8 @@
 #include <sstream>
 #include <vector>
 #include <IRremoteESP8266.h>
+#include <ESP8266HTTPClient.h>
+#include <ESP8266httpUpdate.h>
 
 
 #include <OneWire.h>
@@ -84,6 +86,48 @@ void MQTTConnect() {
   }
 }
 
+
+void upgrade_started() {
+  Serial.println("HTTP update process started");
+}
+
+void upgrade_finished() {
+  Serial.println("HTTP update process finished");
+}
+
+void upgrade_progress(int cur, int total) {
+  Serial.printf("HTTP update process at %d of %d bytes...\n", cur, total);
+}
+
+void upgrade_error(int err) {
+  Serial.printf("HTTP update fatal error code %d\n", err);
+}
+
+void upgrade(String url) {
+    WiFiClient client;
+
+    ESPhttpUpdate.setLedPin(LED_BUILTIN, LOW);
+    ESPhttpUpdate.onStart(upgrade_started);
+    ESPhttpUpdate.onEnd(upgrade_finished);
+    ESPhttpUpdate.onProgress(upgrade_progress);
+    ESPhttpUpdate.onError(upgrade_error);
+
+    t_httpUpdate_return ret = ESPhttpUpdate.update(client, url);
+
+    switch (ret) {
+      case HTTP_UPDATE_FAILED:
+        Serial.printf("Error (%d): %s\n", ESPhttpUpdate.getLastError(), ESPhttpUpdate.getLastErrorString().c_str());
+        break;
+
+      case HTTP_UPDATE_NO_UPDATES:
+        Serial.println("NO_UPDATES");
+        break;
+
+      case HTTP_UPDATE_OK:
+        Serial.println("OK");
+        break;
+    }
+}
 
 String formatIRData2(String m) {
     String n = "{";
@@ -263,6 +307,11 @@ void callback(char* topic, byte* payload, unsigned int length) {
     stepper->motor_pin_3 = stepperPins[1]; //电机不能反转,需要调换两个的位置
     stepper->motor_pin_4 = stepperPins[3];
     stepper->number_of_steps = stepsPerRevolution;
+  }
+  if(strcmp(cmd, "upg") == 0) {
+    String url = doc["upgrade"]["u"].as<String>();
+    Serial.println("upgrade");
+    upgrade(url);
   }
   if(strcmp(cmd, "rt") == 0) {
     uint16_t p = doc["pin"]["p"].as<uint16_t>();
