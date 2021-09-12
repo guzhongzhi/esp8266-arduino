@@ -309,7 +309,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
     stepper->number_of_steps = stepsPerRevolution;
   }
   if(strcmp(cmd, "upg") == 0) {
-    String url = doc["upgrade"]["u"].as<String>();
+    String url = doc["upg"]["u"].as<String>();
     Serial.println("upgrade");
     upgrade(url);
   }
