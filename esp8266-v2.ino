@@ -345,9 +345,9 @@ void callback(char* topic, byte* payload, unsigned int length) {
     uint16_t v = doc["pin"]["v"].as<uint16_t>();
     pinMode(p, OUTPUT);
     if(v > 0) {
-      digitalWrite(p,1);    
+      digitalWrite(p,HIGH);    
     } else {
-      digitalWrite(p,0);
+      digitalWrite(p,LOW);
     }
   }
   //读取模拟信号
