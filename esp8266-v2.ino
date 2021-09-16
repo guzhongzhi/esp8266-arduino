@@ -357,7 +357,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
     cmdFeedBack["p"] = p; 
     cmdFeedBack["v"] = analogRead(p); 
   }
-  //读取模拟信号
+  //读取模拟信号ADC引脚
   if(strcmp(cmd,"ra0") == 0) {
     cmdFeedBack["p"] = A0;
     cmdFeedBack["v"] = analogRead(A0); 
