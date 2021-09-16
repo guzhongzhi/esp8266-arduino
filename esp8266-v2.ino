@@ -353,12 +353,17 @@ void callback(char* topic, byte* payload, unsigned int length) {
   //读取模拟信号
   if(strcmp(cmd,"ra") == 0) {
     uint16_t p = doc["pin"]["p"].as<uint16_t>();
-    pinMode(p, INPUT);
+    //pinMode(p, INPUT);
     cmdFeedBack["p"] = p; 
     cmdFeedBack["v"] = analogRead(p); 
   }
+  //读取模拟信号
+  if(strcmp(cmd,"ra0") == 0) {
+    cmdFeedBack["p"] = A0;
+    cmdFeedBack["v"] = analogRead(A0); 
+  }
   //写模拟信号
-  if(strcmp(cmd,"ra") == 0) {
+  if(strcmp(cmd,"sa") == 0) {
     uint16_t p = doc["pin"]["p"].as<uint16_t>();
     uint16_t v = doc["pin"]["v"].as<uint16_t>();
     pinMode(p, OUTPUT);
