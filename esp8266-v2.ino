@@ -343,13 +343,26 @@ void callback(char* topic, byte* payload, unsigned int length) {
   if ( strcmp(cmd,"sd") == 0 ) {
     uint16_t p = doc["pin"]["p"].as<uint16_t>();
     uint16_t v = doc["pin"]["v"].as<uint16_t>();
+
+    uint16_t t = doc["pin"]["t"].as<uint16_t>(); //持续多少毫秒
+    uint16_t tv = doc["pin"]["tv"].as<uint16_t>(); //持续多少毫秒后的值
+    
     pinMode(p, OUTPUT);
     if(v > 0) {
       digitalWrite(p,HIGH);    
     } else {
       digitalWrite(p,LOW);
     }
+    if(t>0) {
+      delay(t);
+      if(tv > 0) {
+        digitalWrite(p,HIGH);    
+      } else {
+        digitalWrite(p,LOW);
+      }
+    }
   }
+  
   //读取模拟信号
   if(strcmp(cmd,"ra") == 0) {
     uint16_t p = doc["pin"]["p"].as<uint16_t>();
