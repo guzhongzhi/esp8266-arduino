@@ -53,8 +53,7 @@ const uint16_t kMinUnknownSize = 12;
 IRrecv* irReceiver = NULL;
 IRrecv irrecv(14, 1024, 15, true);
 decode_results results;  // Somewhere to store the results
-String lastIRData = "";
-bool IRReceiverEnabled = false;
+
 //
 Stepper* stepper = NULL;
 //https://blog.csdn.net/weixin_42358937/article/details/107022433
@@ -86,48 +85,160 @@ void MQTTConnect() {
   }
 }
 
+class Executor {
+  public: 
+    virtual void execute() = 0;
+    virtual bool stopNext() = 0;
+    virtual String getName() = 0;
+    
+};
+
+//心跳
+class HeadBeat :public Executor {
+  public:
+  String getName() {
+    return String("heartBeat");
+  };
+  void execute()  {
+    unsigned long now = millis();
+    if((now - lastMsg) > duration) {
+      Serial.println("heartBeat");
+      lastMsg = now;
+      MQTTClient.publish(registryTopic, jsonDeviceInfo("").c_str());
+    }
+  };
+  bool stopNext() {
+    return false;
+  }
+  HeadBeat(unsigned long d) {
+    duration = d;
+  };
+  protected:
+  unsigned long lastMsg;
+  unsigned long duration;
+};
+
 
 void upgrade_started() {
   Serial.println("HTTP update process started");
-}
-
+};
 void upgrade_finished() {
   Serial.println("HTTP update process finished");
-}
-
+};  
 void upgrade_progress(int cur, int total) {
   Serial.printf("HTTP update process at %d of %d bytes...\n", cur, total);
-}
-
+};  
 void upgrade_error(int err) {
   Serial.printf("HTTP update fatal error code %d\n", err);
-}
+};
+//升级
+class Upgrade: public Executor {
+  public:
+  String getName() {
+    return String("Upgrade");
+  };
+  bool stopNext() {
+    return true;
+  }
+  void execute() {
+    this->upgrade();
+  };
+  Upgrade(String url){
+    this->url = url;
+  };
 
-void upgrade(String url) {
-    WiFiClient client;
+  protected:
+    String url;
+    void upgrade() {
+      Serial.printf("execute upgrade");
+      WiFiClient client;
+  
+      ESPhttpUpdate.setLedPin(LED_BUILTIN, LOW);
+      ESPhttpUpdate.onStart(upgrade_started);
+      ESPhttpUpdate.onEnd(upgrade_finished);
+      ESPhttpUpdate.onProgress(upgrade_progress);
+      ESPhttpUpdate.onError(upgrade_error);
+  
+      t_httpUpdate_return ret = ESPhttpUpdate.update(client, url);
+  
+      switch (ret) {
+        case HTTP_UPDATE_FAILED:
+          Serial.printf("Error (%d): %s\n", ESPhttpUpdate.getLastError(), ESPhttpUpdate.getLastErrorString().c_str());
+          break;
+  
+        case HTTP_UPDATE_NO_UPDATES:
+          Serial.println("NO_UPDATES");
+          break;
+  
+        case HTTP_UPDATE_OK:
+          Serial.println("OK");
+          break;
+      }
+    };
+};
 
-    ESPhttpUpdate.setLedPin(LED_BUILTIN, LOW);
-    ESPhttpUpdate.onStart(upgrade_started);
-    ESPhttpUpdate.onEnd(upgrade_finished);
-    ESPhttpUpdate.onProgress(upgrade_progress);
-    ESPhttpUpdate.onError(upgrade_error);
+struct node{
+  Executor *executor;
+  struct node *next;
+};
 
-    t_httpUpdate_return ret = ESPhttpUpdate.update(client, url);
-
-    switch (ret) {
-      case HTTP_UPDATE_FAILED:
-        Serial.printf("Error (%d): %s\n", ESPhttpUpdate.getLastError(), ESPhttpUpdate.getLastErrorString().c_str());
-        break;
-
-      case HTTP_UPDATE_NO_UPDATES:
-        Serial.println("NO_UPDATES");
-        break;
-
-      case HTTP_UPDATE_OK:
-        Serial.println("OK");
-        break;
+//执行链
+class LinkedList {
+  private:
+  node *head, *last;
+  public:
+  LinkedList() {
+    head = NULL;
+    last = NULL;
+  };
+  void execute() {
+      node *n;
+      n = head;
+      while(NULL != n) {
+          if(NULL != n->executor) {
+              n->executor->execute();
+              if(n->executor->stopNext()) {
+                return;
+              }
+          }
+          n=n->next;
+      }
+  };
+  void deleteCmd(String name) {
+    
+  };
+  void append(Executor * exec) {
+    node *n = head;
+    bool isExisting = false;
+    while(n != NULL) {
+        if(n->executor->getName() == exec->getName()) {
+          n->executor = exec;
+          isExisting = true;
+        }
+        n = n->next;
     }
-}
+    if(isExisting == true) {
+      return;
+    }
+    
+    node *tmp = new node;
+    tmp->executor = exec;
+    Serial.println("add new node");
+    Serial.println(tmp->executor->getName());
+    //exec->execute();
+    tmp->next = NULL;
+    if(head == NULL){
+      head = tmp;
+      last = tmp;
+    } else {
+      last->next=tmp;
+      last = tmp;
+    }
+  };
+};
+
+LinkedList *list = new LinkedList();
+
 
 String formatIRData2(String m) {
     String n = "{";
@@ -146,27 +257,6 @@ String formatIRData2(String m) {
         n += String(m[i]);      
     }
     return n;
-}
-
-bool checkIrInput() {
-   bool rs=irrecv.decode(&results);
-   if(!rs) {
-       return false;
-   }
-    String a = resultToSourceCode(&results);
-    String b = formatIRData2(a);
-    Serial.println("===========================================");
-
-   int docLen = (int)(2048);
-   DynamicJsonDocument  doc(docLen);
-   doc["c"] = "rir";
-   doc["d"] = b;
-   String output = "";
-   serializeJson( doc,  output);
-   Serial.println(output);
-   lastIRData=output;
-   yield();
-   return true;
 }
 
 
@@ -266,13 +356,174 @@ float readTemperature(int pin) {
   return celsius;
 }
 
+
+void sendData(DynamicJsonDocument cmdFeedBack) {
+  String output = "";
+  serializeJson( cmdFeedBack,  output);
+  Serial.println("output");
+  Serial.println(output);
+  MQTTClient.publish(registryTopic, jsonDeviceInfo(output).c_str());
+}
+
+class TemperatureReader:public Executor {
+  public:
+  TemperatureReader(String name,String cmd,int pin, int interval) {
+    this->pin = pin;
+    this->cmd = cmd;
+    this->interval = interval;
+    this->name = name;
+  };
+  String getName() {
+    return this->name;
+  };  
+  bool stopNext() {
+    return false;
+  }
+  void execute() {
+    unsigned long now = millis();
+    if( (now - this->lastMsg) > this->interval) {
+      this->lastMsg = now;
+    } else {
+      return;
+    }
+    
+    float temper = readTemperature(this->pin);
+    DynamicJsonDocument cmdFeedBack(256);
+    cmdFeedBack["c"] = this->cmd.c_str();
+    cmdFeedBack["v"] = temper;
+    cmdFeedBack["p"] = this->pin;
+    sendData(cmdFeedBack);
+  };
+  protected:
+  int pin;
+  unsigned long lastMsg;
+  int interval;
+  String cmd;
+  String name;
+};
+
+class RDExecutor:public Executor {
+  public:
+  String getName() {
+    return this->name;
+  };
+  bool stopNext() {
+    return false;
+  };
+  RDExecutor(String name,String cmd,int pin,int interval) {
+    this->cmd = cmd;
+    this->pin = pin;
+    this->interval = interval;
+    this->name = name;
+  };
+  void execute() {
+    unsigned long now = millis();
+    if( (now - this->lastMsg) > this->interval) {
+      this->lastMsg = now;
+    } else {
+      return;
+    }
+    DynamicJsonDocument cmdFeedBack(256);
+    cmdFeedBack["c"] = this->cmd.c_str();
+    cmdFeedBack["p"] = this->pin; 
+    cmdFeedBack["v"] = digitalRead(this->pin); 
+    sendData(cmdFeedBack);
+  };
+  protected:
+  String cmd;
+  String name;
+  int pin;
+  unsigned long lastMsg;
+  int interval;
+};
+
+class  AnalogReadExecutor:public Executor {
+  public:
+  bool stopNext() {
+    return false;
+  };
+  String getName() {
+    return this->name;
+  };
+  AnalogReadExecutor(String name,String cmd,int pin,int interval) {
+    this->cmd = cmd;
+    this->pin = pin;
+    this->interval = interval;
+    this->name = name;
+  };
+  void execute() {
+    unsigned long now = millis();
+    if( (now - this->lastMsg) > this->interval) {
+      this->lastMsg = now;
+    } else {
+      return;
+    }
+    DynamicJsonDocument cmdFeedBack(256);
+    cmdFeedBack["c"] = this->cmd.c_str();
+    cmdFeedBack["p"] = this->pin; 
+    cmdFeedBack["v"] = analogRead(this->pin); 
+    sendData(cmdFeedBack);
+  };
+  protected:
+  String cmd;
+  String name;
+  int pin;
+  unsigned long lastMsg;
+  int interval;  
+};
+
+class IRReaderExecutor:public Executor {
+  public:
+  IRReaderExecutor(String name,String cmd) {
+    this->name = name;
+    this->cmd = cmd;
+  };
+  bool stopNext() {
+    return false;
+  };
+  String getName() {
+    return this->name;
+  };
+  String checkIrInput() {
+     bool rs=irrecv.decode(&results);
+     if(!rs) {
+         return "";
+     }
+     String a = resultToSourceCode(&results);
+     String b = formatIRData2(a);
+  
+     int docLen = (int)(2048);
+     DynamicJsonDocument  doc(docLen);
+     doc["c"] = "rir";
+     doc["d"] = b;
+     String output = "";
+     serializeJson( doc,  output);
+     Serial.println(output);
+     lastIRData=output;
+     yield();
+     return output;
+  };
+  void execute(){
+    this->checkIrInput();
+    if(this->lastIRData != "") {
+      Serial.println(this->lastIRData);
+      MQTTClient.publish(registryTopic, jsonDeviceInfo(this->lastIRData.c_str()).c_str());    
+      this->lastIRData = "";
+    }
+  };
+  protected:
+  String lastIRData;
+  String name;
+  String cmd;
+};
+
 void callback(char* topic, byte* payload, unsigned int length) {
   char data[length + 1];
   for (int i = 0; i < length; i++) {
     data[i] = (char) payload[i];
   }
   data[length] = '\0';
-  Serial.println(length);
+  Serial.println(data);
    int docLen = (int) (8102);
   DynamicJsonDocument doc(docLen);
   DeserializationError error = deserializeJson(doc, data);
@@ -284,7 +535,6 @@ void callback(char* topic, byte* payload, unsigned int length) {
   }
 
   const char* cmd = doc["c"].as<char*>();
-  Serial.println(cmd);
   
   DynamicJsonDocument cmdFeedBack(256);
   cmdFeedBack["c"] = cmd;
@@ -311,14 +561,25 @@ void callback(char* topic, byte* payload, unsigned int length) {
   if(strcmp(cmd, "upg") == 0) {
     String url = doc["upg"]["u"].as<String>();
     Serial.println("upgrade");
-    upgrade(url);
+    //upgrade(url);
+    Upgrade* u = new Upgrade(url);
+    u->execute();
   }
   if(strcmp(cmd, "rt") == 0) {
     uint16_t p = doc["pin"]["p"].as<uint16_t>();
+    bool le = doc["pin"]["le"].as<bool>();
+    int lpi = doc["pin"]["lpi"].as<int>();
+    
     Serial.println("read temperture");
     Serial.println(p);
     cmdFeedBack["p"] = p; 
     cmdFeedBack["v"] = readTemperature(p);
+    
+    if(le == true) {
+      Serial.println("read temperture add loop");
+      TemperatureReader* t = new TemperatureReader(String("rt"),String(cmd),p,lpi);
+      list->append(t);      
+    }
   }
   //读数红外设置
   if ( strcmp(cmd,"sir") == 0 ) {
@@ -326,18 +587,27 @@ void callback(char* topic, byte* payload, unsigned int length) {
     Serial.println("setup sir");
     Serial.println(p);
     if(p > 0) {
-      IRReceiverEnabled = true;
-    } else if(irReceiver != NULL) {
-      IRReceiverEnabled = false;
+      IRReaderExecutor* irr = new IRReaderExecutor(String("read_ir"),String("rir"));
+      list->append(irr);
+    } else {
+      list->deleteCmd("read_ir");
     }
     cmdFeedBack["p"] = p; 
   }
   //读数据字信号
   if ( strcmp(cmd,"rd") == 0 ) {
     uint16_t p = doc["pin"]["p"].as<uint16_t>();
+    bool le = doc["pin"]["le"].as<bool>();
+    int lpi = doc["pin"]["lpi"].as<int>();
+    
     pinMode(p, INPUT);
     cmdFeedBack["p"] = p; 
     cmdFeedBack["v"] = digitalRead(p); 
+
+    if(le == true) {
+      RDExecutor* t = new RDExecutor(String("rd"),String(cmd),p,lpi);
+      list->append(t);      
+    }
   }
   //写数字信号
   if ( strcmp(cmd,"sd") == 0 ) {
@@ -366,22 +636,45 @@ void callback(char* topic, byte* payload, unsigned int length) {
   //读取模拟信号
   if(strcmp(cmd,"ra") == 0) {
     uint16_t p = doc["pin"]["p"].as<uint16_t>();
-    //pinMode(p, INPUT);
+    bool le = doc["pin"]["le"].as<bool>();
+    int lpi = doc["pin"]["lpi"].as<int>();
+    pinMode(p, INPUT);
     cmdFeedBack["p"] = p; 
     cmdFeedBack["v"] = analogRead(p); 
+
+    if(le == true) {
+      AnalogReadExecutor* are = new AnalogReadExecutor(String("ra"),String(cmd),p,lpi);
+      list->append(are);
+    }
   }
   //读取模拟信号ADC引脚
   if(strcmp(cmd,"ra0") == 0) {
+    bool le = doc["pin"]["le"].as<bool>();
+    int lpi = doc["pin"]["lpi"].as<int>();
     cmdFeedBack["p"] = A0;
     cmdFeedBack["v"] = analogRead(A0); 
+
+    if(le == true) {
+      AnalogReadExecutor* are = new AnalogReadExecutor(String("ra0"),String(cmd),A0,lpi);
+      list->append(are);
+    }
   }
   //写模拟信号
   if(strcmp(cmd,"sa") == 0) {
     uint16_t p = doc["pin"]["p"].as<uint16_t>();
     uint16_t v = doc["pin"]["v"].as<uint16_t>();
+
+    uint16_t t = doc["pin"]["t"].as<uint16_t>(); //持续多少毫秒
+    uint16_t tv = doc["pin"]["tv"].as<uint16_t>(); //持续多少毫秒后的值
+    
     pinMode(p, OUTPUT);
     cmdFeedBack["p"] = p; 
     analogWrite(p,v);
+
+    if(t > 0) {
+      delay(t);
+      analogWrite(p,tv);
+    }
   }
   //红外发射
   if(strcmp(cmd,"irs") == 0) {
@@ -419,16 +712,17 @@ void callback(char* topic, byte* payload, unsigned int length) {
     }
   }
   
-  String output = "";
-  serializeJson( cmdFeedBack,  output);
-   
-  MQTTClient.publish(registryTopic, jsonDeviceInfo(output).c_str());
+  //String output = "";
+  //serializeJson( cmdFeedBack,  output);
+  //MQTTClient.publish(registryTopic, jsonDeviceInfo(output).c_str());
+
+  sendData(cmdFeedBack);  
 }
 
 void setup() {
   Serial.begin(115200);
   Serial.println("");
-  
+
   Serial.println(MQTT_MAX_PACKET_SIZE);
   if (!autoConfig()){
       smartConfig();
@@ -438,16 +732,19 @@ void setup() {
   #endif
   MQTTClient.setServer("mqtt.home.gulusoft.com", 1883);
   MQTTClient.setCallback(callback);
-
+  if (!MQTTClient.connected()) {
+    MQTTConnect();
+  }
   //
   stepper = &myStepper;
 
-  
   irReceiver = NULL;
   
   irrecv.setUnknownThreshold(12);
   irrecv.setTolerance(25);  // Override the default tolerance.
   irrecv.enableIRIn();      // Start the receiver
+
+  list->append(new HeadBeat(10000));
 }
 
 String jsonDeviceInfo(String data) {
@@ -466,11 +763,7 @@ String jsonDeviceInfo(String data) {
    return output;
 }
 
-unsigned long lastMsg = 0;
-
-void cloop() {
- 
-  unsigned long now = millis();
+void loop() {
  if( stepperTotal > 0 && stepper != NULL) {
     Serial.println(stepperTotal);
     stepperTotal--;
@@ -484,27 +777,11 @@ void cloop() {
     delay(50);
     return;
   }
+  /////
+  
   if (!MQTTClient.connected()) {
     MQTTConnect();
   }
-  if(lastIRData != "") {
-    Serial.println("send ir data");
-    Serial.println(lastIRData);
-    MQTTClient.publish(registryTopic, jsonDeviceInfo(lastIRData.c_str()).c_str());
-    lastIRData = "";
-    lastMsg = now;
-  }
+  list->execute();
   MQTTClient.loop();
-  if(IRReceiverEnabled) {
-    checkIrInput();
-  }
-  if (now - lastMsg > 10000) {
-    lastMsg = now;
-    MQTTClient.publish(registryTopic, jsonDeviceInfo("").c_str());
-  }
-  
-}
-
-void loop() {
-  cloop();
 }
