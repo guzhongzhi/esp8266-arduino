@@ -204,14 +204,26 @@ class LinkedList {
           n=n->next;
       }
   };
-  void deleteCmd(String name) {
-    
+  void deleteExecutor(String name) {
+    node *n = head;
+    while(n != NULL) {
+      if(n->executor != NULL && n->executor->getName() == name) {
+        n->executor = NULL;
+      }
+      n = n->next;
+    }
   };
   void append(Executor * exec) {
     node *n = head;
     bool isExisting = false;
     while(n != NULL) {
+        if(n->executor == NULL) {
+          n->executor = exec;
+          isExisting = true;
+          break;
+        }
         if(n->executor->getName() == exec->getName()) {
+          delete(n->executor);
           n->executor = exec;
           isExisting = true;
         }
@@ -579,6 +591,8 @@ void callback(char* topic, byte* payload, unsigned int length) {
       Serial.println("read temperture add loop");
       TemperatureReader* t = new TemperatureReader(String("rt"),String(cmd),p,lpi);
       list->append(t);      
+    } else {
+      list->deleteExecutor("rt");
     }
   }
   //读数红外设置
@@ -590,7 +604,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
       IRReaderExecutor* irr = new IRReaderExecutor(String("read_ir"),String("rir"));
       list->append(irr);
     } else {
-      list->deleteCmd("read_ir");
+      list->deleteExecutor("read_ir");
     }
     cmdFeedBack["p"] = p; 
   }
@@ -607,6 +621,8 @@ void callback(char* topic, byte* payload, unsigned int length) {
     if(le == true) {
       RDExecutor* t = new RDExecutor(String("rd"),String(cmd),p,lpi);
       list->append(t);      
+    } else {
+      list->deleteExecutor("rd");
     }
   }
   //写数字信号
@@ -645,6 +661,8 @@ void callback(char* topic, byte* payload, unsigned int length) {
     if(le == true) {
       AnalogReadExecutor* are = new AnalogReadExecutor(String("ra"),String(cmd),p,lpi);
       list->append(are);
+    } else {
+      list->deleteExecutor("ra");
     }
   }
   //读取模拟信号ADC引脚
@@ -657,6 +675,8 @@ void callback(char* topic, byte* payload, unsigned int length) {
     if(le == true) {
       AnalogReadExecutor* are = new AnalogReadExecutor(String("ra0"),String(cmd),A0,lpi);
       list->append(are);
+    } else {
+      list->deleteExecutor("ra0");
     }
   }
   //写模拟信号
