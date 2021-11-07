@@ -117,20 +117,6 @@ class HeadBeat :public Executor {
   unsigned long lastMsg;
   unsigned long duration;
 };
-
-
-void upgrade_started() {
-  Serial.println("HTTP update process started");
-};
-void upgrade_finished() {
-  Serial.println("HTTP update process finished");
-};  
-void upgrade_progress(int cur, int total) {
-  Serial.printf("HTTP update process at %d of %d bytes...\n", cur, total);
-};  
-void upgrade_error(int err) {
-  Serial.printf("HTTP update fatal error code %d\n", err);
-};
 //升级
 class Upgrade: public Executor {
   public:
@@ -143,24 +129,26 @@ class Upgrade: public Executor {
   void execute() {
     this->upgrade();
   };
-  Upgrade(String url){
-    this->url = url;
+  Upgrade(String host, String path, int port){
+    this->host = host;
+    this->path = path;
+    this->port = port;
   };
 
   protected:
-    String url;
+    String host;
+    String path;
+    int port;
     void upgrade() {
       Serial.printf("execute upgrade");
   
-      WiFiClient client;
       ESPhttpUpdate.setLedPin(LED_BUILTIN, HIGH);
       ESPhttpUpdate.onStart(upgrade_started);
       ESPhttpUpdate.onEnd(upgrade_finished);
       ESPhttpUpdate.onProgress(upgrade_progress);
       ESPhttpUpdate.onError(upgrade_error);
-      
-      t_httpUpdate_return ret = ESPhttpUpdate.update(client, url);
-  
+
+      t_httpUpdate_return ret = ESPhttpUpdate.update(host, port,path);  
       switch (ret) {
         case HTTP_UPDATE_FAILED:
           Serial.printf("Error (%d): %s\n", ESPhttpUpdate.getLastError(), ESPhttpUpdate.getLastErrorString().c_str());
@@ -175,6 +163,19 @@ class Upgrade: public Executor {
           break;
       }
     };
+};
+
+void upgrade_started() {
+  Serial.println("process started");
+};
+void upgrade_finished() {
+  Serial.println("process finished");
+};  
+void upgrade_progress(int cur, int total) {
+  Serial.printf("%d of %d bytes...\n", cur, total);
+};  
+void upgrade_error(int err) {
+  Serial.printf("fatal error code %d\n", err);
 };
 
 struct node{
@@ -572,13 +573,15 @@ void callback(char* topic, byte* payload, unsigned int length) {
     stepper->motor_pin_4 = stepperPins[3];
     stepper->number_of_steps = stepsPerRevolution;
   }
+  
   if(strcmp(cmd, "upg") == 0) {
-    String url = doc["upg"]["u"].as<String>();
-    Serial.println("upgrade");
-    //upgrade(url);
-    Upgrade* u = new Upgrade(url);
-    u->execute();
+    String host = doc["upg"]["host"].as<String>();
+    int port = doc["upg"]["port"].as<int>();
+    String path = doc["upg"]["path"].as<String>();
+    Upgrade* u = new Upgrade(host,path,port);
+    list->append(u);
   }
+  
   if(strcmp(cmd, "rt") == 0) {
     uint16_t p = doc["pin"]["p"].as<uint16_t>();
     bool le = doc["pin"]["le"].as<bool>();

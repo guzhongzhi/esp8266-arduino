@@ -7,7 +7,7 @@ using namespace std;
 
 
 //System
-String versionCode = "1.2.9";
+String versionCode = "1.2.13";
 bool isNewBoot = true;
 
 typedef struct Command {
