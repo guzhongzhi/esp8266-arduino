@@ -52,7 +52,6 @@ class HeadBeat :public Executor {
   void execute()  {
     unsigned long now = millis();
     if((now - lastMsg) > duration) {
-      Serial.println("heartBeat upgrade");
       lastMsg = now;
       MQTTClient.publish(registryTopic, jsonDeviceInfo("").c_str());
     }
@@ -103,9 +102,7 @@ class Upgrade: public Executor {
     String host;
     String path;
     int port;
-    void upgrade() {
-      Serial.printf("execute upgrade");
-  
+    void upgrade() {  
       ESPhttpUpdate.setLedPin(LED_BUILTIN, HIGH);
       ESPhttpUpdate.onStart(upgrade_started);
       ESPhttpUpdate.onEnd(upgrade_finished);
@@ -187,9 +184,6 @@ class LinkedList {
     
     node *tmp = new node;
     tmp->executor = exec;
-    Serial.println("add new node");
-    Serial.println(tmp->executor->getName());
-    //exec->execute();
     tmp->next = NULL;
     if(head == NULL){
       head = tmp;
