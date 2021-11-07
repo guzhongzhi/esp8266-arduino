@@ -151,14 +151,14 @@ class Upgrade: public Executor {
     String url;
     void upgrade() {
       Serial.printf("execute upgrade");
-      WiFiClient client;
   
-      ESPhttpUpdate.setLedPin(LED_BUILTIN, LOW);
+      WiFiClient client;
+      ESPhttpUpdate.setLedPin(LED_BUILTIN, HIGH);
       ESPhttpUpdate.onStart(upgrade_started);
       ESPhttpUpdate.onEnd(upgrade_finished);
       ESPhttpUpdate.onProgress(upgrade_progress);
       ESPhttpUpdate.onError(upgrade_error);
-  
+      
       t_httpUpdate_return ret = ESPhttpUpdate.update(client, url);
   
       switch (ret) {
@@ -530,6 +530,8 @@ class IRReaderExecutor:public Executor {
 };
 
 void callback(char* topic, byte* payload, unsigned int length) {
+  Serial.println("data length");
+  Serial.println(length);
   char data[length + 1];
   for (int i = 0; i < length; i++) {
     data[i] = (char) payload[i];
@@ -750,6 +752,8 @@ void setup() {
   #ifdef DEBUG
   Serial.println(WiFi.macAddress());
   #endif
+
+  
   MQTTClient.setServer("mqtt.home.gulusoft.com", 1883);
   MQTTClient.setCallback(callback);
   if (!MQTTClient.connected()) {
