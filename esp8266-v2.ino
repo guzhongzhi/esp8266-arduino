@@ -87,9 +87,10 @@ void MQTTConnect() {
 
 class Executor {
   public: 
-    virtual void execute() = 0;
+    virtual void execute(unsigned long now) = 0;
     virtual bool stopNext() = 0;
     virtual String getName() = 0;
+    virtual bool isFinished() = 0;
     
 };
 
@@ -99,13 +100,15 @@ class HeadBeat :public Executor {
   String getName() {
     return String("heartBeat");
   };
-  void execute()  {
-    unsigned long now = millis();
+  void execute(unsigned long now)  {
     if((now - lastMsg) > duration) {
       Serial.println("heartBeat");
       lastMsg = now;
       MQTTClient.publish(registryTopic, jsonDeviceInfo("").c_str());
     }
+  };
+  bool isFinished() {
+    return false;
   };
   bool stopNext() {
     return false;
@@ -117,6 +120,7 @@ class HeadBeat :public Executor {
   unsigned long lastMsg;
   unsigned long duration;
 };
+
 //升级
 class Upgrade: public Executor {
   public:
@@ -126,7 +130,10 @@ class Upgrade: public Executor {
   bool stopNext() {
     return true;
   }
-  void execute() {
+  bool isFinished() {
+    return false;
+  };
+  void execute(unsigned long now) {
     this->upgrade();
   };
   Upgrade(String host, String path, int port){
@@ -195,9 +202,15 @@ class LinkedList {
   void execute() {
       node *n;
       n = head;
+      unsigned long now = millis();
       while(NULL != n) {
           if(NULL != n->executor) {
-              n->executor->execute();
+              //如果已经完成了则删除并进入下一次循环
+              if(n->executor->isFinished()) {
+                this->deleteExecutor(n->executor->getName());
+                break;
+              }
+              n->executor->execute(now);
               if(n->executor->stopNext()) {
                 return;
               }
@@ -378,59 +391,25 @@ void sendData(DynamicJsonDocument cmdFeedBack) {
   MQTTClient.publish(registryTopic, jsonDeviceInfo(output).c_str());
 }
 
-class TemperatureReader:public Executor {
+class  ReadExecutor:public Executor {
   public:
-  TemperatureReader(String name,String cmd,int pin, int interval) {
-    this->pin = pin;
-    this->cmd = cmd;
-    this->interval = interval;
-    this->name = name;
-  };
-  String getName() {
-    return this->name;
-  };  
-  bool stopNext() {
-    return false;
-  }
-  void execute() {
-    unsigned long now = millis();
-    if( (now - this->lastMsg) > this->interval) {
-      this->lastMsg = now;
-    } else {
-      return;
-    }
-    
-    float temper = readTemperature(this->pin);
-    DynamicJsonDocument cmdFeedBack(256);
-    cmdFeedBack["c"] = this->cmd.c_str();
-    cmdFeedBack["v"] = temper;
-    cmdFeedBack["p"] = this->pin;
-    sendData(cmdFeedBack);
-  };
-  protected:
-  int pin;
-  unsigned long lastMsg;
-  int interval;
-  String cmd;
-  String name;
-};
-
-class RDExecutor:public Executor {
-  public:
-  String getName() {
-    return this->name;
-  };
   bool stopNext() {
     return false;
   };
-  RDExecutor(String name,String cmd,int pin,int interval) {
+  String getName() {
+    return this->name;
+  };
+  bool isFinished() {
+    return false;
+  };
+  ReadExecutor(String name,String cmd,int pin,int interval,String readDataType) {
     this->cmd = cmd;
     this->pin = pin;
     this->interval = interval;
     this->name = name;
+    this->readDataType = readDataType;
   };
-  void execute() {
-    unsigned long now = millis();
+  void execute(unsigned long now) {
     if( (now - this->lastMsg) > this->interval) {
       this->lastMsg = now;
     } else {
@@ -439,50 +418,84 @@ class RDExecutor:public Executor {
     DynamicJsonDocument cmdFeedBack(256);
     cmdFeedBack["c"] = this->cmd.c_str();
     cmdFeedBack["p"] = this->pin; 
-    cmdFeedBack["v"] = digitalRead(this->pin); 
-    sendData(cmdFeedBack);
-  };
-  protected:
-  String cmd;
-  String name;
-  int pin;
-  unsigned long lastMsg;
-  int interval;
-};
-
-class  AnalogReadExecutor:public Executor {
-  public:
-  bool stopNext() {
-    return false;
-  };
-  String getName() {
-    return this->name;
-  };
-  AnalogReadExecutor(String name,String cmd,int pin,int interval) {
-    this->cmd = cmd;
-    this->pin = pin;
-    this->interval = interval;
-    this->name = name;
-  };
-  void execute() {
-    unsigned long now = millis();
-    if( (now - this->lastMsg) > this->interval) {
-      this->lastMsg = now;
-    } else {
-      return;
+    if(this->readDataType == "temperture") {
+      float temper = readTemperature(this->pin);
+    } else if(this->readDataType == "digital") {
+      cmdFeedBack["v"] = digitalRead(this->pin); 
+    } else if(this->readDataType == "analog") {
+      cmdFeedBack["v"] = analogRead(this->pin); 
     }
-    DynamicJsonDocument cmdFeedBack(256);
-    cmdFeedBack["c"] = this->cmd.c_str();
-    cmdFeedBack["p"] = this->pin; 
-    cmdFeedBack["v"] = analogRead(this->pin); 
     sendData(cmdFeedBack);
   };
   protected:
   String cmd;
   String name;
+  String readDataType;
   int pin;
   unsigned long lastMsg;
   int interval;  
+  bool isAnalog;
+};
+
+//引脚写
+class PinWriterExecutor:public Executor {
+  public:
+  PinWriterExecutor(String name, String cmd,int  pin, int value, int duration, int val) {
+    this->name = name;
+    this->cmd = cmd;
+    this->pin = pin;
+    this->value = value;
+    this->duration = duration;
+    this->val = val;
+    this->isAnalog = false;
+    this->firstTime = true;
+  };
+  void setIsAnalog(bool v) {
+    this->isAnalog = v;
+  };
+  bool isFinished() {
+    return this->duration < 0;
+  };
+  bool stopNext() {
+    return false;
+  };
+  String getName() {
+    return this->name;
+  };
+  void execute(unsigned long now){
+    if(this->firstTime) {
+      this->launch = now;
+      this->writeValue(this->value);
+      this->firstTime = false;
+    } else {
+      if(this->duration > 0) {
+        if(this->duration < (now - this->launch)) {
+          this->writeValue(this->val);
+          this->duration = -1;
+        }        
+      } else {
+        this->duration = -1;
+      }
+    }
+  };
+  protected:
+  bool isAnalog;
+  String name;
+  String cmd;
+  int pin;
+  int value;
+  int duration;
+  int val;
+  unsigned long launch;
+  bool firstTime;
+  void writeValue(int value) {
+    pinMode(this->pin, OUTPUT);
+    if(this->isAnalog) {
+        analogWrite(this->pin,value);
+      } else {
+        digitalWrite(this->pin,value);
+      }
+  }
 };
 
 class IRReaderExecutor:public Executor {
@@ -492,6 +505,9 @@ class IRReaderExecutor:public Executor {
     this->cmd = cmd;
   };
   bool stopNext() {
+    return false;
+  };
+  bool isFinished() {
     return false;
   };
   String getName() {
@@ -516,7 +532,7 @@ class IRReaderExecutor:public Executor {
      yield();
      return output;
   };
-  void execute(){
+  void execute(unsigned long now){
     this->checkIrInput();
     if(this->lastIRData != "") {
       Serial.println(this->lastIRData);
@@ -593,8 +609,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
     cmdFeedBack["v"] = readTemperature(p);
     
     if(le == true) {
-      Serial.println("read temperture add loop");
-      TemperatureReader* t = new TemperatureReader(String("rt"),String(cmd),p,lpi);
+      ReadExecutor* t = new ReadExecutor(String("rt"),String(cmd),p,lpi,"temperture");
       list->append(t);      
     } else {
       list->deleteExecutor("rt");
@@ -624,8 +639,8 @@ void callback(char* topic, byte* payload, unsigned int length) {
     cmdFeedBack["v"] = digitalRead(p); 
 
     if(le == true) {
-      RDExecutor* t = new RDExecutor(String("rd"),String(cmd),p,lpi);
-      list->append(t);      
+      ReadExecutor* t = new ReadExecutor(String("rd"),String(cmd),p,lpi,"digital");
+      list->append(t);
     } else {
       list->deleteExecutor("rd");
     }
@@ -637,20 +652,16 @@ void callback(char* topic, byte* payload, unsigned int length) {
 
     uint16_t t = doc["pin"]["t"].as<uint16_t>(); //持续多少毫秒
     uint16_t tv = doc["pin"]["tv"].as<uint16_t>(); //持续多少毫秒后的值
-    
-    pinMode(p, OUTPUT);
-    if(v > 0) {
-      digitalWrite(p,HIGH);    
-    } else {
-      digitalWrite(p,LOW);
+
+    if(t<0) {
+      t = 0;
     }
-    if(t>0) {
-      delay(t);
-      if(tv > 0) {
-        digitalWrite(p,HIGH);    
-      } else {
-        digitalWrite(p,LOW);
-      }
+    if(v > 0) {
+      PinWriterExecutor* are = new PinWriterExecutor(String("sd"),String(cmd),p,HIGH,t,LOW);
+      list->append(are);
+    } else {
+      PinWriterExecutor* are = new PinWriterExecutor(String("sd"),String(cmd),p,LOW,t,HIGH);
+      list->append(are);
     }
   }
   
@@ -664,8 +675,8 @@ void callback(char* topic, byte* payload, unsigned int length) {
     cmdFeedBack["v"] = analogRead(p); 
 
     if(le == true) {
-      AnalogReadExecutor* are = new AnalogReadExecutor(String("ra"),String(cmd),p,lpi);
-      list->append(are);
+      ReadExecutor* t = new ReadExecutor(String("ra"),String(cmd),p,lpi,"analog");
+      list->append(t);
     } else {
       list->deleteExecutor("ra");
     }
@@ -678,8 +689,8 @@ void callback(char* topic, byte* payload, unsigned int length) {
     cmdFeedBack["v"] = analogRead(A0); 
 
     if(le == true) {
-      AnalogReadExecutor* are = new AnalogReadExecutor(String("ra0"),String(cmd),A0,lpi);
-      list->append(are);
+      ReadExecutor* t = new ReadExecutor(String("ra0"),String(cmd),A0,lpi,"analog");
+      list->append(t);
     } else {
       list->deleteExecutor("ra0");
     }
@@ -692,14 +703,13 @@ void callback(char* topic, byte* payload, unsigned int length) {
     uint16_t t = doc["pin"]["t"].as<uint16_t>(); //持续多少毫秒
     uint16_t tv = doc["pin"]["tv"].as<uint16_t>(); //持续多少毫秒后的值
     
-    pinMode(p, OUTPUT);
     cmdFeedBack["p"] = p; 
-    analogWrite(p,v);
-
-    if(t > 0) {
-      delay(t);
-      analogWrite(p,tv);
+    if(t < 0) {
+      t = 0;
     }
+    PinWriterExecutor* are = new PinWriterExecutor(String("sa"),String(cmd),p,v,t,tv);
+    are->setIsAnalog(true);
+    list->append(are);
   }
   //红外发射
   if(strcmp(cmd,"irs") == 0) {
@@ -716,31 +726,19 @@ void callback(char* topic, byte* payload, unsigned int length) {
     for(int i=0;i<data.size();i++) {
       rawData[i] = data[i].as<uint16_t>();
     }
-    Serial.println("send start");
     irsend.sendRaw(rawData, data.size(), 38);
-
-    Serial.println("send end");
-    
     bool hasAfter = doc["pin"]["f"];
     if(hasAfter) {
        delay(50);
-       Serial.println("has after send data need to send");
        JsonArray data = doc["pin"]["fd"];
        Serial.println(data.size());
        uint16_t rawData[data.size()];
        for(int i=0;i<data.size();i++) {
           rawData[i] = data[i].as<uint16_t>();
        }
-       Serial.println("send start");
        irsend.sendRaw(rawData, data.size(), 38);
-       Serial.println("has after send data need to send done");
     }
   }
-  
-  //String output = "";
-  //serializeJson( cmdFeedBack,  output);
-  //MQTTClient.publish(registryTopic, jsonDeviceInfo(output).c_str());
-
   sendData(cmdFeedBack);  
 }
 
