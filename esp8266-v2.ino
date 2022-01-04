@@ -437,6 +437,59 @@ class  ReadExecutor:public Executor {
   bool isAnalog;
 };
 
+
+class  StepperExeutor:public Executor {
+  public:
+  bool stopNext() {
+    return false;
+  };
+  String getName() {
+    return this->name;
+  };
+  bool isFinished() {
+    return stepper == NULL || this->stepTotal <= 0;
+  };
+  StepperExeutor(String name,String cmd,int pins[],int stepTotal,int stepperST,int stepsPerRevolution) {
+    this->cmd = cmd;
+    this->stepperST = stepperST;
+    this->stepTotal = stepTotal;
+    this->name = name;
+
+    for(int i = 0;i<4;i++) {
+      pinMode(pins[i], OUTPUT);
+      digitalWrite(pins[i],HIGH);
+      this->pins[i] = pins[i];
+    }
+    stepper->motor_pin_1 = pins[0];
+    stepper->motor_pin_2 = pins[2]; //电机不能反转,需要调换两个的位置
+    stepper->motor_pin_3 = pins[1]; //电机不能反转,需要调换两个的位置
+    stepper->motor_pin_4 = pins[3];
+    stepper->number_of_steps = stepsPerRevolution;
+  };
+  void execute(unsigned long now) {
+      this->stepTotal--;
+      stepper->step(this->stepperST > 0 ? 1 : -1);
+      if(this->stepTotal == 0) {
+        Serial.println("set pins to low");
+        for(int i=0;i<4;i++) {
+            digitalWrite(this->pins[i], LOW);
+        }
+      }
+      unsigned long tmp = now - this->lastMsg;
+      if(tmp < 50 && this->lastMsg > 0) {
+        delay(50 - tmp);
+      }
+      this->lastMsg = now;
+  };
+  protected:
+  String cmd;
+  String name;
+  int pins[4];
+  unsigned long lastMsg;
+  int stepTotal;
+  int stepperST;
+};
+
 //引脚写
 class PinWriterExecutor:public Executor {
   public:
@@ -576,18 +629,13 @@ void callback(char* topic, byte* payload, unsigned int length) {
     JsonArray data = doc["stepper"]["d"];
     for(int i=0;i<4;i++) {
       stepperPins[i] = data[i].as<int>();
-      pinMode(stepperPins[i], OUTPUT);
-      digitalWrite(stepperPins[i],HIGH);
     }
     stepperTotal = doc["stepper"]["v"].as<int>();
     stepperST = doc["stepper"]["st"].as<int>();
     int stepsPerRevolution = doc["stepper"]["pr"].as<int>(); // change this to fit the number of steps per revolution
-    //stepper = new Stepper(stepsPerRevolution, stepperPins[0],stepperPins[1],stepperPins[2],stepperPins[3]);
-    stepper->motor_pin_1 = stepperPins[0];
-    stepper->motor_pin_2 = stepperPins[2]; //电机不能反转,需要调换两个的位置
-    stepper->motor_pin_3 = stepperPins[1]; //电机不能反转,需要调换两个的位置
-    stepper->motor_pin_4 = stepperPins[3];
-    stepper->number_of_steps = stepsPerRevolution;
+    list->deleteExecutor("stepper");
+    StepperExeutor* u = new StepperExeutor("stepper","stepper",stepperPins,stepperTotal,stepperST,stepsPerRevolution);
+    list->append(u);
   }
   
   if(strcmp(cmd, "upg") == 0) {
@@ -789,21 +837,6 @@ String jsonDeviceInfo(String data) {
 }
 
 void loop() {
- if( stepperTotal > 0 && stepper != NULL) {
-    Serial.println(stepperTotal);
-    stepperTotal--;
-    stepper->step(stepperST > 0 ? 1 : -1);
-    if(stepperTotal == 0) {
-      Serial.println("set pins to low");
-      for(int i=0;i<4;i++) {
-          digitalWrite(stepperPins[i], LOW);
-      }
-    }
-    delay(50);
-    return;
-  }
-  /////
-  
   if (!MQTTClient.connected()) {
     MQTTConnect();
   }
